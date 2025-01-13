@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 add_executable(client "")
 add_executable(client_epoll "")
 add_executable(server "")
-
+add_executable(server_epoll "")
 target_sources(client
   PRIVATE
   "client.cc"
@@ -21,6 +21,11 @@ target_sources(server
   "server.cc"
 )
 
+
+target_sources(server_epoll
+  PRIVATE
+  "server_epoll.cc"
+)
 include_directories(
   "${PROJECT_BINARY_DIR}/include"
   "."

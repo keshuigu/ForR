@@ -4,13 +4,15 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <set>
 
 #define USER_LIMIT 5
 #define BUFFER_SIZE 64
@@ -26,6 +28,23 @@ int setnonblocking(int fd) {
   int new_option = old_option | O_NONBLOCK;
   fcntl(fd, F_SETFL, new_option);
   return old_option;
+}
+void addfd(int epfd, int fd, uint32_t flag) {
+  epoll_event e;
+  e.data.fd = fd;
+  e.events = flag;
+  epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &e);
+  setnonblocking(fd);
+}
+
+void delfd(int epfd, int fd) { epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr); }
+
+void modfd(int epfd, int fd, uint32_t flag) {
+  epoll_event e;
+  e.data.fd = fd;
+  e.events = flag;
+  epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &e);
+  // setnonblocking(fd);
 }
 
 int main(int argc, char* argv[]) {
@@ -56,25 +75,30 @@ int main(int argc, char* argv[]) {
   // 足够大的空间存放客户端数据
   // 以连接的socketfd做索引
   client_data* users = new client_data[FD_LIMIT];
-  pollfd fds[USER_LIMIT + 1];
+
+  // 记录所有描述符
+  // int fds[USER_LIMIT + 1];
+  // for (int i = 1; i <= USER_LIMIT; i++) {
+  //   fds[i] = -1;
+  // }
+  // fds[0] = listenfd;
+
+  epoll_event events[1024];
   int user_counter = 0;
-  for (int i = 1; i <= USER_LIMIT; i++) {
-    fds[i].fd = -1;
-    fds[i].events = 0;
-    fds[i].revents = 0;
-  }
-  fds[0].fd = listenfd;
-  fds[0].events = POLLIN | POLLERR;
-  fds[0].revents = 0;
+
+  std::set<int> fds;
+
+  int epfd = epoll_create(USER_LIMIT);
+  addfd(epfd, listenfd, EPOLLIN | EPOLLERR | EPOLLET);
 
   while (true) {
-    ret = poll(fds, user_counter + 1, -1);
+    ret = epoll_wait(epfd, events, 1024, -1);
     if (ret < 0) {
-      printf("poll failed");
+      printf("epoll failed");
       break;
     }
-    for (int i = 0; i < user_counter + 1; i++) {
-      if (i == 0 && fds[i].revents & POLLIN) {
+    for (int i = 0; i < ret; i++) {
+      if (events[i].data.fd == listenfd && (events[i].events & EPOLLIN)) {
         struct sockaddr_in client_address;
         socklen_t len = sizeof(client_address);
         int connfd = accept(listenfd, (struct sockaddr*)&client_address, &len);
@@ -92,64 +116,68 @@ int main(int argc, char* argv[]) {
         user_counter++;
         // 拷贝
         users[connfd].address = client_address;
-        setnonblocking(connfd);
-        fds[user_counter].fd = connfd;
-        fds[user_counter].events = POLLIN | POLLRDHUP | POLLERR;
-        fds[user_counter].revents = 0;
+        fds.emplace(connfd);
+        // fds[user_counter] = connfd;
+        addfd(epfd, connfd, EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLET);
         printf("comes a new user \n");
-      } else if (fds[i].revents & POLLERR) {
+      } else if (events[i].events & EPOLLERR) {
         printf("error from %d \n", i);
         char errors[100];
         memset(errors, '\0', 100);
         socklen_t length = sizeof(errors);
-        if (getsockopt(fds[i].fd, SOL_SOCKET, SO_ERROR, &errors, &length)) {
+        if (getsockopt(events[i].data.fd, SOL_SOCKET, SO_ERROR, &errors,
+                       &length)) {
           printf("get socket option failed\n");
         }
         printf("%s", errors);
         continue;
-      } else if (fds[i].revents & POLLRDHUP) {
+      } else if (events[i].events & EPOLLRDHUP) {
         // 关闭链接
         // 将后面的fd前移填空
-        users[fds[i].fd] = users[fds[user_counter].fd];
-        close(fds[i].fd);
-        fds[i] = fds[user_counter];
-        i--;
+        // users[events[i].data.fd] = users[fds[user_counter]];
+        delfd(epfd, events[i].data.fd);
+        close(events[i].data.fd);
+        // fds[i] = fds[user_counter];
+        fds.erase(fds.find(events[i].data.fd));
         user_counter--;
         printf("a client left\n");
-      } else if (fds[i].revents & POLLIN) {
-        int connfd = fds[i].fd;
+      } else if (events[i].events & EPOLLIN) {
+        int connfd = events[i].data.fd;
         memset(users[connfd].read_buf, '\0', BUFFER_SIZE);
         ret = recv(connfd, users[connfd].read_buf, BUFFER_SIZE - 1, 0);
         printf("get %d bytes %s from %d\n", ret, users[connfd].read_buf,
                connfd);
-        if (ret < 0) {
+        if (ret <= 0) {
           if (errno != EAGAIN) {
+            delfd(epfd, connfd);
             close(connfd);
-            users[fds[i].fd] = users[fds[user_counter].fd];
-            fds[i] = fds[user_counter];
-            i--;
+            fds.erase(fds.find(events[i].data.fd));
+            // users[fds[i].fd] = users[fds[user_counter].fd];
+            // fds[i] = fds[user_counter];
+            // i--;
             user_counter--;
           }
-        } else if (ret > 0) {
-          for (int j = 0; j <= user_counter; j++) {
-            if (fds[j].fd == connfd) {
+        } else {
+          for (auto it = fds.begin(); it != fds.end(); ++it) {
+            int curfd = *it;
+            if (curfd == connfd) {
               continue;
             }
-            fds[j].events &= ~POLLIN;
-            fds[j].events |= POLLOUT;
-            users[fds[j].fd].write_buf = users[connfd].read_buf;
+            modfd(epfd, curfd, EPOLLOUT);
+            // fds[j].events &= ~POLLIN;
+            // fds[j].events |= POLLOUT;
+            users[curfd].write_buf = users[connfd].read_buf;
           }
         }
-      } else if (fds[i].revents & POLLOUT) {
-        int connfd = fds[i].fd;
+      } else if (events[i].events & EPOLLOUT) {
+        int connfd = events[i].data.fd;
         if (!users[connfd].write_buf) {
           continue;
         }
         ret = send(connfd, users[connfd].write_buf,
                    strlen(users[connfd].write_buf), 0);
         users[connfd].write_buf = nullptr;
-        fds[i].events &= ~POLLOUT;
-        fds[i].events |= POLLIN;
+        modfd(epfd, connfd, EPOLLIN);
       }
     }
   }
