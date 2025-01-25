@@ -73,6 +73,8 @@ class CGIConn {
           RemoveFd(epoll_fd_, sockfd_);
           break;
         } else if (ret > 0) {
+          memset(buf_, '\0', kBufferSize);
+          read_idx_ = 0;
           RemoveFd(epoll_fd_, sockfd_);
           break;
         } else {
