@@ -54,14 +54,14 @@ class CGIConn {
         std::printf("user content is:%s\n", buf_);
         // 遇到\r\n处理请求
         for (; idx < read_idx_; idx++) {
-          if (idx >= 1 && buf_[idx - 1] == '\r' && buf_[idx] == '\n') {
+          if (buf_[idx] == '\n') {
             break;
           }
         }
         if (idx == read_idx_) {
           continue;
         }
-        buf_[idx - 1] = '\0';
+        buf_[idx] = '\0';
         const char* file_name = buf_;
         if (access(file_name, F_OK) == -1) {
           RemoveFd(epoll_fd_, sockfd_);
@@ -80,6 +80,7 @@ class CGIConn {
         } else {
           close(STDOUT_FILENO);
           dup(sockfd_);
+          std::printf("cmd is:%s\n", buf_);
           // 第一个参数为path
           // 第二个参数为程序名
           // 第三个参数及后为所附加的参数

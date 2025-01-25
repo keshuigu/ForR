@@ -200,8 +200,9 @@ void ProcessPool<T>::RunChild() {
   int ret = -1;
   while (!stop_) {
     number = epoll_wait(epoll_fd_, events, kMaxEventNumber, -1);
-    if (number < 0 && errno != EAGAIN) {
-      std::printf("epoll failed\n");
+    if (number < 0 && (errno != EAGAIN && errno != EINTR)) {
+      std::printf("epoll failed, errno:%d\n", errno);
+      perror("epoll child");
       break;
     }
     for (int i = 0; i < number; i++) {
@@ -280,8 +281,9 @@ void ProcessPool<T>::RunParent() {
   int ret = -1;
   while (!stop_) {
     number = epoll_wait(epoll_fd_, events, kMaxEventNumber, -1);
-    if (number < 0 && errno != EAGAIN) {
-      std::printf("epoll failed\n");
+    if (number < 0 && (errno != EAGAIN && errno != EINTR)) {
+      std::printf("epoll failed, errno:%d\n", errno);
+      perror("epoll parent");
       break;
     }
     for (int i = 0; i < number; i++) {
