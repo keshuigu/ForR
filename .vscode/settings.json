@@ -47,6 +47,18 @@
     "streambuf": "cpp",
     "cinttypes": "cpp",
     "typeinfo": "cpp",
-    "csignal": "cpp"
+    "csignal": "cpp",
+    "list": "cpp",
+    "semaphore": "cpp",
+    "chrono": "cpp",
+    "condition_variable": "cpp",
+    "ctime": "cpp",
+    "set": "cpp",
+    "ratio": "cpp",
+    "mutex": "cpp",
+    "stop_token": "cpp",
+    "thread": "cpp",
+    "cerrno": "cpp",
+    "cassert": "cpp"
   }
 }
