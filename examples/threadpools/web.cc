@@ -42,12 +42,12 @@ void ShowError(int connfd, const char* info) {
 }
 
 int main(int argc, char* argv[]) {
-  char* ip = nullptr;
+  const char* ip = nullptr;
   int port = -1;
   if (argc <= 2) {
     // std::printf("usage: %s ip_address port_number_\n", basename(argv[0]));
     // return 1;
-    ip = "localhost";
+    ip = std::string("localhost").c_str();
     port = 12345;
   } else {
     ip = argv[1];
